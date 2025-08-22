@@ -312,6 +312,7 @@ class SyncServer(Server):
                 AnthropicProvider(
                     name="anthropic",
                     api_key=model_settings.anthropic_api_key,
+                    base_url=model_settings.anthropic_base_url,
                 )
             )
         if model_settings.ollama_base_url:

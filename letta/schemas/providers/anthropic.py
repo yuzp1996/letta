@@ -90,7 +90,7 @@ class AnthropicProvider(Provider):
     provider_type: Literal[ProviderType.anthropic] = Field(ProviderType.anthropic, description="The type of the provider.")
     provider_category: ProviderCategory = Field(ProviderCategory.base, description="The category of the provider (base or byok)")
     api_key: str = Field(..., description="API key for the Anthropic API.")
-    base_url: str = "https://api.anthropic.com/v1"
+    base_url: str = "https://api.anthropic.com"
 
     async def check_api_key(self):
         if self.api_key:
@@ -112,9 +112,12 @@ class AnthropicProvider(Provider):
         NOTE: currently there is no GET /models, so we need to hardcode
         """
         if self.api_key:
-            anthropic_client = anthropic.AsyncAnthropic(api_key=self.api_key)
+            anthropic_client = anthropic.AsyncAnthropic(api_key=self.api_key, base_url=self.base_url)
         elif model_settings.anthropic_api_key:
-            anthropic_client = anthropic.AsyncAnthropic()
+            anthropic_client = anthropic.AsyncAnthropic(
+                api_key=model_settings.anthropic_api_key,
+                base_url=model_settings.anthropic_base_url
+            )
         else:
             raise ValueError("No API key provided")
 

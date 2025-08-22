@@ -64,10 +64,11 @@ class AnthropicClient(LLMClientBase):
         client = await self._get_anthropic_client_async(llm_config, async_client=True)
         request_data["stream"] = True
 
-        # Add fine-grained tool streaming beta header for better streaming performance
-        # This helps reduce buffering when streaming tool call parameters
+        # Temporarily disable fine-grained tool streaming beta header due to API compatibility issues
+        # This was causing "url is not iterable" errors on some tool configurations
         # See: https://docs.anthropic.com/en/docs/build-with-claude/tool-use/fine-grained-streaming
-        betas = ["fine-grained-tool-streaming-2025-05-14"]
+        # betas = ["fine-grained-tool-streaming-2025-05-14"]
+        betas = []
 
         return await client.beta.messages.create(**request_data, betas=betas)
 
@@ -127,17 +128,18 @@ class AnthropicClient(LLMClientBase):
         self, llm_config: LLMConfig, async_client: bool = False
     ) -> Union[anthropic.AsyncAnthropic, anthropic.Anthropic]:
         api_key, _, _ = self.get_byok_overrides(llm_config)
+        base_url = model_settings.anthropic_base_url
 
         if async_client:
             return (
-                anthropic.AsyncAnthropic(api_key=api_key, max_retries=model_settings.anthropic_max_retries)
+                anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, max_retries=model_settings.anthropic_max_retries)
                 if api_key
-                else anthropic.AsyncAnthropic(max_retries=model_settings.anthropic_max_retries)
+                else anthropic.AsyncAnthropic(base_url=base_url, max_retries=model_settings.anthropic_max_retries)
             )
         return (
-            anthropic.Anthropic(api_key=api_key, max_retries=model_settings.anthropic_max_retries)
+            anthropic.Anthropic(api_key=api_key, base_url=base_url, max_retries=model_settings.anthropic_max_retries)
             if api_key
-            else anthropic.Anthropic(max_retries=model_settings.anthropic_max_retries)
+            else anthropic.Anthropic(base_url=base_url, max_retries=model_settings.anthropic_max_retries)
         )
 
     @trace_method
@@ -145,17 +147,18 @@ class AnthropicClient(LLMClientBase):
         self, llm_config: LLMConfig, async_client: bool = False
     ) -> Union[anthropic.AsyncAnthropic, anthropic.Anthropic]:
         api_key, _, _ = await self.get_byok_overrides_async(llm_config)
+        base_url = model_settings.anthropic_base_url
 
         if async_client:
             return (
-                anthropic.AsyncAnthropic(api_key=api_key, max_retries=model_settings.anthropic_max_retries)
+                anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, max_retries=model_settings.anthropic_max_retries)
                 if api_key
-                else anthropic.AsyncAnthropic(max_retries=model_settings.anthropic_max_retries)
+                else anthropic.AsyncAnthropic(base_url=base_url, max_retries=model_settings.anthropic_max_retries)
             )
         return (
-            anthropic.Anthropic(api_key=api_key, max_retries=model_settings.anthropic_max_retries)
+            anthropic.Anthropic(api_key=api_key, base_url=base_url, max_retries=model_settings.anthropic_max_retries)
             if api_key
-            else anthropic.Anthropic(max_retries=model_settings.anthropic_max_retries)
+            else anthropic.Anthropic(base_url=base_url, max_retries=model_settings.anthropic_max_retries)
         )
 
     @trace_method
@@ -279,7 +282,10 @@ class AnthropicClient(LLMClientBase):
     async def count_tokens(self, messages: List[dict] = None, model: str = None, tools: List[OpenAITool] = None) -> int:
         logging.getLogger("httpx").setLevel(logging.WARNING)
 
-        client = anthropic.AsyncAnthropic()
+        client = anthropic.AsyncAnthropic(
+            api_key=model_settings.anthropic_api_key,
+            base_url=model_settings.anthropic_base_url
+        )
         if messages and len(messages) == 0:
             messages = None
         if tools and len(tools) > 0:
@@ -293,13 +299,47 @@ class AnthropicClient(LLMClientBase):
                 messages=messages or [{"role": "user", "content": "hi"}],
                 tools=anthropic_tools or [],
             )
-        except:
-            raise
+            token_count = result.input_tokens
+            if messages is None:
+                token_count -= 8
+            return token_count
+        except anthropic.NotFoundError as e:
+            # If the count_tokens endpoint is not supported (e.g., on custom API servers),
+            # fall back to a rough estimation
+            logger.warning(f"count_tokens endpoint not supported: {e}. Using rough estimation.")
+            return self._estimate_tokens(messages, tools)
+        except Exception as e:
+            logger.warning(f"Error counting tokens: {e}. Using rough estimation.")
+            return self._estimate_tokens(messages, tools)
 
-        token_count = result.input_tokens
-        if messages is None:
-            token_count -= 8
-        return token_count
+    def _estimate_tokens(self, messages: List[dict] = None, tools: List[OpenAITool] = None) -> int:
+        """Rough estimation of token count when count_tokens API is not available"""
+        token_count = 0
+
+        # Estimate tokens for messages
+        if messages:
+            for message in messages:
+                if isinstance(message, dict) and "content" in message:
+                    content = message["content"]
+                    if isinstance(content, str):
+                        # Rough estimation: ~4 characters per token
+                        token_count += len(content) // 4
+                    elif isinstance(content, list):
+                        for item in content:
+                            if isinstance(item, dict) and "text" in item:
+                                token_count += len(item["text"]) // 4
+
+        # Estimate tokens for tools
+        if tools:
+            for tool in tools:
+                # Rough estimation for tool definitions
+                tool_str = json.dumps(tool.model_dump() if hasattr(tool, 'model_dump') else tool)
+                token_count += len(tool_str) // 4
+
+        # Add some base tokens for system overhead
+        token_count += 50
+
+        return max(token_count, 1)  # Ensure at least 1 token
 
     def is_reasoning_model(self, llm_config: LLMConfig) -> bool:
         return (

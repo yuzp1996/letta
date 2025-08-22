@@ -753,7 +753,7 @@ class AnthropicProvider(Provider):
     provider_type: Literal[ProviderType.anthropic] = Field(ProviderType.anthropic, description="The type of the provider.")
     provider_category: ProviderCategory = Field(ProviderCategory.base, description="The category of the provider (base or byok)")
     api_key: str = Field(..., description="API key for the Anthropic API.")
-    base_url: str = "https://api.anthropic.com/v1"
+    base_url: str = "https://api.anthropic.com"
 
     def check_api_key(self):
         from letta.llm_api.anthropic import anthropic_check_valid_api_key

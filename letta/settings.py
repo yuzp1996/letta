@@ -129,6 +129,11 @@ class ModelSettings(BaseSettings):
 
     # anthropic
     anthropic_api_key: Optional[str] = None
+    anthropic_base_url: str = Field(
+        default="https://api.anthropic.com",
+        description="Base URL for Anthropic API (without /v1 suffix)",
+        validation_alias=AliasChoices("ANTHROPIC_BASE_URL")
+    )
     anthropic_max_retries: int = 3
 
     # ollama
